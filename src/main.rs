@@ -1,6 +1,5 @@
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
-use web_reader::markdown::MarkdownRenderer;
 
 use web_reader::cache::LatestEntry;
 use web_reader::service::WikiService;
@@ -83,10 +82,8 @@ fn run(cli: Cli) -> wiki::Result<()> {
             Ok(())
         }
         Commands::Article { title } => {
-            let article = service.article(&title)?;
-            let renderer = MarkdownRenderer::new("https://en.wikipedia.org/wiki/");
-            let markdown = renderer.render(&article.wikitext);
-            print!("{}", markdown);
+            let markdown = service.markdown(&title)?;
+            print!("{markdown}");
             Ok(())
         }
         Commands::Latest { limit } => {
