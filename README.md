@@ -5,10 +5,9 @@ and turn their wikitext into Markdown.
 
 ## Status
 
-MVP. The synchronous REST API client (`search` + fetch latest public revision as
-wikitext) works, with an on-disk article cache. The wikitext → Markdown converter is
-not written yet; the plan is to use the
-[`parse_wiki_text`](https://crates.io/crates/parse_wiki_text) crate.
+MVP. Synchronous REST API client (search + fetch latest public revision as wikitext),
+an on-disk article cache, and a wikitext → Markdown converter built on
+[`parse_wiki_text`](https://crates.io/crates/parse_wiki_text).
 
 ## Usage
 
@@ -21,6 +20,9 @@ cargo run -- article "Rust (programming language)"
 
 # ...and save it to a file
 cargo run -- article "Rust (programming language)" --save article.wikitext
+
+# Fetch and render as Markdown
+cargo run -- markdown "Rust (programming language)" --save article.md
 
 # Show recently looked-up articles
 cargo run -- latest --limit 5
@@ -63,6 +65,33 @@ Fetched articles are cached on disk, keyed per language:
 - `latest.json` records successful lookups across all languages, newest-first, one row
   per `(language, title)`. `WikiService::recent_lookups(n)` (the `latest` command) reads
   the first `n` entries directly.
+
+## Wikitext → Markdown
+
+`src/markdown.rs` wraps [`parse_wiki_text`](https://crates.io/crates/parse_wiki_text)
+and renders its node tree as Markdown (`WikiService::markdown`, `markdown` command).
+
+Handled:
+
+- headings, paragraphs, horizontal rules
+- `'''bold'''`, `''italic''`, `'''''both'''''`
+- internal links (`[[Page|label]]`, `#fragments`) resolved against the wiki base URL
+- external links (`[https://… label]`, bare URLs)
+- unordered / ordered / definition lists (with nesting)
+- preformatted blocks and `<syntaxhighlight>` / `<code>` / `<math>` tags
+- tables (first row as header), character entities
+
+Dropped intentionally (no clean Markdown mapping): templates and their parameters,
+`<ref>` citations, categories, images, magic words, comments.
+
+Known limitations: the default `parse_wiki_text` configuration is used (no per-site
+configuration yet), so some namespace/extension behaviour is approximate. Dropped
+inline templates can leave gaps in prose, and empty dropped citations leave section
+headings (e.g. "References") with no body.
+
+The converter is tested against the checked-in fixture
+`fixtures/rust_programming_language.wikitext` so no network access is needed; its
+rendered output is checked in as `fixtures/rust_programming_language.md`.
 
 ## Tests
 

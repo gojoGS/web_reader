@@ -40,6 +40,7 @@ pub struct Article {
 pub struct WikiService {
     client: WikiClient,
     language: String,
+    site_base: String,
     cache: ArticleCache,
 }
 
@@ -47,11 +48,13 @@ impl WikiService {
     /// Build a service from the given configuration.
     pub fn new(config: WikiConfig) -> wiki::Result<Self> {
         let language = config.language.clone();
+        let site_base = format!("https://{}.{}.org/wiki/", config.language, config.project);
         let client = WikiClient::new(config)?;
         let cache = ArticleCache::from_env(&language, ttl_from_env());
         Ok(Self {
             client,
             language,
+            site_base,
             cache,
         })
     }
@@ -59,6 +62,12 @@ impl WikiService {
     /// Language code this service reads from.
     pub fn language(&self) -> &str {
         &self.language
+    }
+
+    /// Base URL used to resolve internal wiki links, e.g.
+    /// `https://en.wikipedia.org/wiki/`.
+    pub fn site_base(&self) -> &str {
+        &self.site_base
     }
 
     /// Full-text page search.
@@ -138,6 +147,15 @@ impl WikiService {
     /// The `n` most recent successful lookups, newest first.
     pub fn recent_lookups(&self, n: usize) -> Vec<LatestEntry> {
         self.cache.recent(n)
+    }
+
+    /// Fetch a page and render its wikitext as Markdown.
+    pub fn markdown(&self, title: &str) -> wiki::Result<String> {
+        let article = self.article(title)?;
+        Ok(crate::markdown::to_markdown(
+            &article.wikitext,
+            &self.site_base,
+        ))
     }
 
     fn record_lookup(&self, article: &Article, from_cache: bool) {

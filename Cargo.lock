@@ -1027,6 +1027,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
+name = "parse_wiki_text"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd59a245c58efa02bd73c9462fd9d4c28952d650092c6bcba43b60b4707171dd"
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1905,6 +1911,7 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "parse_wiki_text",
  "percent-encoding",
  "reqwest",
  "serde",

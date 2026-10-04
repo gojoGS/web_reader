@@ -46,6 +46,17 @@ enum Commands {
         #[arg(long)]
         print: bool,
     },
+    /// Fetch a page and render it as Markdown.
+    Markdown {
+        /// Page title, e.g. "Rust (programming language)".
+        title: String,
+        /// Save the Markdown to this file.
+        #[arg(short, long)]
+        save: Option<PathBuf>,
+        /// Print the Markdown even when saving to a file.
+        #[arg(long)]
+        print: bool,
+    },
     /// Show recently looked-up articles.
     Latest {
         /// Maximum number of entries to show.
@@ -85,6 +96,10 @@ fn run(cli: Cli) -> wiki::Result<()> {
             let article = service.article(&title)?;
             emit_article(&article, save, print)
         }
+        Commands::Markdown { title, save, print } => {
+            let markdown = service.markdown(&title)?;
+            emit_text(&markdown, save, print)
+        }
         Commands::Latest { limit } => {
             print_latest(&service.recent_lookups(limit));
             Ok(())
@@ -112,17 +127,17 @@ fn emit_article(article: &Article, save: Option<PathBuf>, print: bool) -> wiki::
         "{} — revision {} ({})",
         article.title, article.revision_id, article.revision_timestamp
     );
+    emit_text(&article.wikitext, save, print)
+}
 
+/// Optionally save and/or echo a block of text.
+fn emit_text(text: &str, save: Option<PathBuf>, print: bool) -> wiki::Result<()> {
     if let Some(path) = &save {
-        std::fs::write(path, &article.wikitext)?;
-        eprintln!(
-            "saved {} bytes to {}",
-            article.wikitext.len(),
-            path.display()
-        );
+        std::fs::write(path, text)?;
+        eprintln!("saved {} bytes to {}", text.len(), path.display());
     }
     if print || save.is_none() {
-        println!("{}", article.wikitext);
+        print!("{text}");
     }
     Ok(())
 }

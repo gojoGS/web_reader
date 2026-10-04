@@ -6,11 +6,13 @@ parser can be developed offline without hammering the API.
 | File | Article | Revision | Retrieved |
 | --- | --- | --- | --- |
 | `rust_programming_language.wikitext` | [Rust (programming language)](https://en.wikipedia.org/wiki/Rust_(programming_language)) | 1375877769 | 2026-10-04 |
+| `rust_programming_language.md` | rendered output of the above (reference for the converter) | 1375877769 | 2026-10-04 |
 
-Regenerate any fixture with:
+Regenerate the fixtures with:
 
 ```sh
-cargo run -- article "Rust (programming language)" --save fixtures/rust_programming_language.wikitext
+cargo run -- article  "Rust (programming language)" --save fixtures/rust_programming_language.wikitext
+cargo run -- markdown "Rust (programming language)" --save fixtures/rust_programming_language.md
 ```
 
 ## License
