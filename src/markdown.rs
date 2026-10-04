@@ -227,7 +227,12 @@ fn render_table(rows: &[TableRow], captions: &[TableCaption], out: &mut String, 
     out.push('\n');
 
     for row in iter {
-        push_table_row(&row_cells(row, base), out);
+        let cells = row_cells(row, base);
+        // Dropped templates leave rows with no real cells; don't emit bare `|`.
+        if cells.iter().all(|cell| cell.trim().is_empty()) {
+            continue;
+        }
+        push_table_row(&cells, out);
     }
     out.push('\n');
 }
@@ -358,7 +363,7 @@ fn cleanup(input: &str) -> String {
             lines.push(String::new());
         }
         pending_blank = false;
-        lines.push(collapsed);
+        lines.push(trim_stray_indent(collapsed));
     }
 
     let mut out = lines.join("\n");
@@ -389,6 +394,39 @@ fn collapse_spaces(line: &str) -> String {
         }
     }
     format!("{indent}{out}")
+}
+
+/// Drop leading whitespace unless it is meaningful indentation that we emit
+/// ourselves (nested list items, definition lists). Stray leading spaces come
+/// from blank lines around dropped templates and would otherwise turn a
+/// paragraph into a Markdown code block.
+fn trim_stray_indent(line: String) -> String {
+    let trimmed = line.trim_start();
+    if preserves_indent(trimmed) {
+        line
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn preserves_indent(trimmed: &str) -> bool {
+    trimmed.starts_with("- ")
+        || trimmed.starts_with("* ")
+        || trimmed.starts_with("+ ")
+        || trimmed.starts_with(": ")
+        || trimmed.starts_with("> ")
+        || trimmed.starts_with('|')
+        || has_ordered_marker(trimmed)
+}
+
+/// Matches our ordered-list marker, `1. `.
+fn has_ordered_marker(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let mut digits = 0;
+    while digits < bytes.len() && bytes[digits].is_ascii_digit() {
+        digits += 1;
+    }
+    digits > 0 && bytes.get(digits) == Some(&b'.') && bytes.get(digits + 1) == Some(&b' ')
 }
 
 #[cfg(test)]
@@ -473,6 +511,33 @@ mod tests {
         let output = md(" preformatted\n line");
         assert!(output.starts_with("```\n"), "got: {output:?}");
         assert!(output.contains("preformatted\n"));
+    }
+
+    #[test]
+    fn leading_whitespace_is_trimmed() {
+        // Dropped templates leave blank lines that used to push the paragraph
+        // into a 4-space Markdown code block.
+        let output = md(
+            "{{Short description|x}}\n{{good article}}\n{{Use mdy dates|date=x}}\n\n'''Title''' is a thing.",
+        );
+        assert!(
+            !output.lines().any(|line| line.starts_with(' ')),
+            "unexpected indentation: {output:?}"
+        );
+        assert!(output.starts_with("**Title**"), "got: {output:?}");
+    }
+
+    #[test]
+    fn table_rows_without_cells_are_skipped() {
+        let input =
+            "{|\n! A !! B\n|-\n| x || y\n|-\n{{album chart|Australia|47}}\n|-\n| z || w\n|}";
+        let output = md(input);
+        assert!(output.contains("| x | y |"), "got: {output:?}");
+        assert!(output.contains("| z | w |"), "got: {output:?}");
+        assert!(
+            !output.lines().any(|line| line.trim() == "|"),
+            "empty rows leaked: {output:?}"
+        );
     }
 
     #[test]
