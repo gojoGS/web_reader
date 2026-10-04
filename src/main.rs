@@ -1,5 +1,4 @@
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
 use std::process::ExitCode;
 use web_reader::markdown::MarkdownRenderer;
 
@@ -35,6 +34,9 @@ enum Commands {
         /// Maximum number of results (1-100).
         #[arg(short, long, default_value_t = 10)]
         limit: u8,
+        /// Print the results as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Fetch a page's latest public revision as wikitext.
     Article {
@@ -71,9 +73,13 @@ fn run(cli: Cli) -> wiki::Result<()> {
 
     let service = WikiService::new(config)?;
     match cli.command {
-        Commands::Search { query, limit } => {
+        Commands::Search { query, limit, json } => {
             let results = service.search(&query, limit)?;
-            print_search(&query, &results);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&results)?);
+            } else {
+                print_search(&query, &results);
+            }
             Ok(())
         }
         Commands::Article { title } => {
@@ -97,7 +103,7 @@ fn print_search(query: &str, results: &[SearchResult]) {
         return;
     }
     for result in results {
-        println!("{}", result.title);
+        println!("{}  {}", result.id, result.title);
         if let Some(description) = result.description.as_deref().filter(|d| !d.is_empty()) {
             println!("    {description}");
         }

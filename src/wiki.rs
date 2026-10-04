@@ -8,8 +8,8 @@
 use std::time::Duration;
 
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Default `User-Agent`, including contact information as required by the
@@ -166,13 +166,13 @@ impl WikiClient {
 }
 
 /// Top-level object returned by `GET /search/page`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SearchResponse {
     pub pages: Vec<SearchResult>,
 }
 
 /// One page match from the search endpoint.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SearchResult {
     pub id: u64,
     /// Title in URL-friendly form.
@@ -194,7 +194,7 @@ pub struct SearchResult {
 }
 
 /// Reduced-size lead image returned with a search result.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Thumbnail {
     #[serde(default)]
     pub mimetype: Option<String>,

@@ -12,17 +12,14 @@ an on-disk article cache, and a wikitext → Markdown converter built on
 ## Usage
 
 ```sh
-# Full-text search
+# Full-text search (prints "<id>  <title>" plus a short description)
 cargo run -- search "Rust programming language" --limit 5
 
-# Fetch a page's latest public revision (prints wikitext)
+# ...as JSON, for scripts (array of result objects, each with an `id`)
+cargo run -- search "Rust programming language" --json
+
+# Fetch an article by title and print it as Markdown
 cargo run -- article "Rust (programming language)"
-
-# ...and save it to a file
-cargo run -- article "Rust (programming language)" --save article.wikitext
-
-# Fetch and render as Markdown
-cargo run -- markdown "Rust (programming language)" --save article.md
 
 # Show recently looked-up articles
 cargo run -- latest --limit 5
