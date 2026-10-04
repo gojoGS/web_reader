@@ -6,8 +6,9 @@ and turn their wikitext into Markdown.
 ## Status
 
 MVP. The synchronous REST API client (`search` + fetch latest public revision as
-wikitext) works. The wikitext → Markdown converter is not written yet; the plan is to
-use the [`parse_wiki_text`](https://crates.io/crates/parse_wiki_text) crate.
+wikitext) works, with an on-disk article cache. The wikitext → Markdown converter is
+not written yet; the plan is to use the
+[`parse_wiki_text`](https://crates.io/crates/parse_wiki_text) crate.
 
 ## Usage
 
@@ -31,12 +32,30 @@ points at this repository's URL; override it if you fork or run it elsewhere.
 | --- | --- | --- | --- |
 | User-Agent | `--user-agent` | `WEB_READER_USER_AGENT` | `web_reader/<version> (+https://github.com/gojoGS/web_reader)` |
 | Language | `--lang` | `WEB_READER_LANG` | `en` |
+| Cache directory | — | `WEB_READER_CACHE_DIR` | platform cache dir |
+| Cache TTL (seconds) | — | `WEB_READER_CACHE_TTL_SECS` | `86400` (24 h) |
 
 Example:
 
 ```sh
 WEB_READER_USER_AGENT="my_tool/0.1 (https://example.org; me@example.org)" cargo run -- article Rust
 ```
+
+## Caching
+
+Fetched articles are cached on disk, keyed per language:
+
+```text
+<cache>/articles/<language>/<sha256(title)>/meta.json      # metadata + TTL
+<cache>/articles/<language>/<sha256(title)>/wikitext.txt   # payload
+```
+
+- Entries have a **24 h TTL**, stored as an RFC 3339 expiry (`expires_at`).
+- Fresh entry → served from cache, no request.
+- Expired entry → refetched. Same revision → only `meta.json` (the TTL) is rewritten,
+  wikitext is kept. New revision → both files are rewritten.
+- Page and revision IDs are local to one wiki (`Earth`/en ≠ `Erde`/de), so the language
+  is part of the cache path.
 
 ## Tests
 

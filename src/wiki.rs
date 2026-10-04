@@ -240,7 +240,7 @@ pub struct Revision {
 }
 
 /// License metadata for a page.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
 pub struct License {
     #[serde(default)]
     pub url: Option<String>,
