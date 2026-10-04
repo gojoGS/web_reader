@@ -13,7 +13,7 @@
 
 use chrono::{Duration, Utc};
 
-use crate::cache::{ArticleCache, ArticleMeta, DEFAULT_TTL_SECS};
+use crate::cache::{ArticleCache, ArticleMeta, DEFAULT_TTL_SECS, LatestEntry};
 use crate::wiki::{self, SearchResult, WikiClient, WikiConfig};
 
 /// A page's latest public revision, ready to be converted or displayed.
@@ -70,9 +70,10 @@ impl WikiService {
     /// cache when a fresh entry exists for this language.
     pub fn article(&self, title: &str) -> wiki::Result<Article> {
         let cached = self.cache.load(title);
+
         if let Some(entry) = &cached {
             if entry.is_fresh(Utc::now()) {
-                return Ok(Article {
+                let article = Article {
                     title: entry.meta.title.clone(),
                     language: self.language.clone(),
                     page_id: entry.meta.page_id,
@@ -80,7 +81,9 @@ impl WikiService {
                     revision_timestamp: entry.meta.revision_timestamp.clone(),
                     wikitext: entry.wikitext.clone(),
                     license: entry.meta.license.clone(),
-                });
+                };
+                self.record_lookup(&article, true);
+                return Ok(article);
             }
         }
 
@@ -90,15 +93,25 @@ impl WikiService {
             context: format!("page '{}'", page.title),
         })?;
 
-        let now = Utc::now();
-        let meta = ArticleMeta {
-            schema: ArticleMeta::SCHEMA,
-            title: page.title.clone(),
+        let article = Article {
+            title: page.title,
             language: self.language.clone(),
             page_id: page.id,
             revision_id: page.latest.id,
-            revision_timestamp: page.latest.timestamp.clone(),
-            license: page.license.clone(),
+            revision_timestamp: page.latest.timestamp,
+            wikitext,
+            license: page.license,
+        };
+
+        let now = Utc::now();
+        let meta = ArticleMeta {
+            schema: ArticleMeta::SCHEMA,
+            title: article.title.clone(),
+            language: article.language.clone(),
+            page_id: article.page_id,
+            revision_id: article.revision_id,
+            revision_timestamp: article.revision_timestamp.clone(),
+            license: article.license.clone(),
             cached_at: now,
             expires_at: now + self.cache.ttl(),
         };
@@ -114,19 +127,31 @@ impl WikiService {
             }
             _ => {
                 // New revision (or a missing payload): rewrite both files.
-                let _ = self.cache.store(&meta, &wikitext);
+                let _ = self.cache.store(&meta, &article.wikitext);
             }
         }
 
-        Ok(Article {
-            title: page.title,
-            language: self.language.clone(),
-            page_id: page.id,
-            revision_id: page.latest.id,
-            revision_timestamp: page.latest.timestamp,
-            wikitext,
-            license: page.license,
-        })
+        self.record_lookup(&article, false);
+        Ok(article)
+    }
+
+    /// The `n` most recent successful lookups, newest first.
+    pub fn recent_lookups(&self, n: usize) -> Vec<LatestEntry> {
+        self.cache.recent(n)
+    }
+
+    fn record_lookup(&self, article: &Article, from_cache: bool) {
+        let entry = LatestEntry {
+            language: article.language.clone(),
+            title: article.title.clone(),
+            page_id: article.page_id,
+            revision_id: article.revision_id,
+            revision_timestamp: article.revision_timestamp.clone(),
+            looked_up_at: Utc::now(),
+            from_cache,
+        };
+        // Best-effort, like the rest of the cache.
+        let _ = self.cache.record_latest(entry);
     }
 }
 

@@ -21,6 +21,9 @@ cargo run -- article "Rust (programming language)"
 
 # ...and save it to a file
 cargo run -- article "Rust (programming language)" --save article.wikitext
+
+# Show recently looked-up articles
+cargo run -- latest --limit 5
 ```
 
 ## Configuration
@@ -48,6 +51,7 @@ Fetched articles are cached on disk, keyed per language:
 ```text
 <cache>/articles/<language>/<sha256(title)>/meta.json      # metadata + TTL
 <cache>/articles/<language>/<sha256(title)>/wikitext.txt   # payload
+<cache>/latest.json                                        # cross-language lookup index
 ```
 
 - Entries have a **24 h TTL**, stored as an RFC 3339 expiry (`expires_at`).
@@ -56,6 +60,9 @@ Fetched articles are cached on disk, keyed per language:
   wikitext is kept. New revision → both files are rewritten.
 - Page and revision IDs are local to one wiki (`Earth`/en ≠ `Erde`/de), so the language
   is part of the cache path.
+- `latest.json` records successful lookups across all languages, newest-first, one row
+  per `(language, title)`. `WikiService::recent_lookups(n)` (the `latest` command) reads
+  the first `n` entries directly.
 
 ## Tests
 

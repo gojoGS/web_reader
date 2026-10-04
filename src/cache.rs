@@ -5,17 +5,21 @@
 //! ```text
 //! <base>/articles/<language>/<sha256(title)>/meta.json
 //! <base>/articles/<language>/<sha256(title)>/wikitext.txt
+//! <base>/latest.json
 //! ```
 //!
 //! Wikitext is stored separately from its metadata so that refreshing the TTL of
 //! an unchanged revision only rewrites the small `meta.json`. The language is
 //! part of the path because page and revision IDs are local to one wiki: the same
 //! topic has different IDs in `en.wikipedia.org` and `de.wikipedia.org`.
+//!
+//! `latest.json` is a cross-language index of successfully looked-up articles,
+//! ordered newest-first so the last `n` lookups are just the first `n` entries.
 
 use std::fmt::Write as _;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -75,9 +79,53 @@ impl CachedArticle {
     }
 }
 
-/// Filesystem-backed article cache for one language wiki.
+/// One entry in the cross-language `latest.json` lookup index.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LatestEntry {
+    /// Language code the article belongs to.
+    pub language: String,
+    /// Title in reading-friendly form.
+    pub title: String,
+    /// Page ID (local to the language wiki).
+    pub page_id: u64,
+    /// Latest public revision ID.
+    pub revision_id: u64,
+    /// Latest public revision timestamp (ISO 8601).
+    pub revision_timestamp: String,
+    /// When the lookup happened.
+    pub looked_up_at: DateTime<Utc>,
+    /// Whether the lookup was served from the cache.
+    pub from_cache: bool,
+}
+
+/// The `latest.json` document. `entries` is ordered newest-first.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LatestIndex {
+    /// Index schema version; bump to invalidate old files.
+    pub schema: u32,
+    /// Successfully looked-up articles, most recent first.
+    pub entries: Vec<LatestEntry>,
+}
+
+impl LatestIndex {
+    /// Current index schema version.
+    pub const SCHEMA: u32 = 1;
+}
+
+impl Default for LatestIndex {
+    fn default() -> Self {
+        Self {
+            schema: Self::SCHEMA,
+            entries: Vec::new(),
+        }
+    }
+}
+
+/// Filesystem-backed article cache for one language wiki, sharing a common
+/// `<base>` directory with other languages for the `latest.json` index.
 #[derive(Debug, Clone)]
 pub struct ArticleCache {
+    base: PathBuf,
     root: PathBuf,
     ttl: Duration,
 }
@@ -95,10 +143,8 @@ impl ArticleCache {
 
     /// Build a cache rooted at `base` for `language`.
     pub fn with_base(base: PathBuf, language: &str, ttl: Duration) -> Self {
-        Self {
-            root: base.join("articles").join(language),
-            ttl,
-        }
+        let root = base.join("articles").join(language);
+        Self { base, root, ttl }
     }
 
     /// Configured time-to-live.
@@ -107,8 +153,18 @@ impl ArticleCache {
     }
 
     /// Root directory holding this language's cached articles.
-    pub fn root(&self) -> &std::path::Path {
+    pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Shared cache base directory (contains `latest.json`).
+    pub fn base(&self) -> &Path {
+        &self.base
+    }
+
+    /// Path of the cross-language lookup index.
+    pub fn latest_path(&self) -> PathBuf {
+        self.base.join("latest.json")
     }
 
     /// Load a cached entry, if present and parseable. The entry may be expired;
@@ -135,6 +191,38 @@ impl ArticleCache {
         let dir = self.entry_dir(&meta.title);
         fs::create_dir_all(&dir)?;
         fs::write(dir.join("meta.json"), to_json(meta)?)
+    }
+
+    /// Read the lookup index. A missing, unparseable, or wrong-version file
+    /// yields an empty index.
+    pub fn load_latest(&self) -> LatestIndex {
+        match fs::read_to_string(self.latest_path()) {
+            Ok(raw) => match serde_json::from_str::<LatestIndex>(&raw) {
+                Ok(index) if index.schema == LatestIndex::SCHEMA => index,
+                _ => LatestIndex::default(),
+            },
+            Err(_) => LatestIndex::default(),
+        }
+    }
+
+    /// Record a successful lookup, moving any existing entry for the same
+    /// `(language, title)` to the front. Keeps one row per article.
+    pub fn record_latest(&self, entry: LatestEntry) -> io::Result<()> {
+        let mut index = self.load_latest();
+        index.entries.retain(|existing| {
+            !(existing.language == entry.language && existing.title == entry.title)
+        });
+        index.entries.insert(0, entry);
+        fs::create_dir_all(&self.base)?;
+        fs::write(self.latest_path(), to_json(&index)?)
+    }
+
+    /// The `n` most recent lookups, newest first. Cheap because the index is
+    /// already sorted newest-first.
+    pub fn recent(&self, n: usize) -> Vec<LatestEntry> {
+        let mut entries = self.load_latest().entries;
+        entries.truncate(n);
+        entries
     }
 
     fn entry_dir(&self, title: &str) -> PathBuf {
@@ -193,6 +281,18 @@ mod tests {
         }
     }
 
+    fn latest(title: &str, language: &str, revision: u64, looked_up_at: i64) -> LatestEntry {
+        LatestEntry {
+            language: language.to_string(),
+            title: title.to_string(),
+            page_id: 1,
+            revision_id: revision,
+            revision_timestamp: "2020-01-01T00:00:00Z".to_string(),
+            looked_up_at: at(looked_up_at),
+            from_cache: false,
+        }
+    }
+
     #[test]
     fn store_then_load_roundtrips() {
         let dir = TempDir::new().unwrap();
@@ -233,7 +333,6 @@ mod tests {
         let meta = meta("Earth", "en", 42, at(150));
         cache.store(&meta, "text").unwrap();
 
-        // Remove the payload, keep the metadata.
         fs::remove_file(cache.wikitext_path("Earth")).unwrap();
         assert!(!cache.load("Earth").unwrap().is_fresh(at(100)));
     }
@@ -269,5 +368,70 @@ mod tests {
 
         assert_eq!(en.load("Earth").unwrap().wikitext, "english");
         assert_eq!(de.load("Erde").unwrap().wikitext, "german");
+    }
+
+    #[test]
+    fn latest_is_newest_first() {
+        let dir = TempDir::new().unwrap();
+        let cache = cache(&dir, "en");
+        cache.record_latest(latest("Earth", "en", 1, 100)).unwrap();
+        cache
+            .record_latest(latest("Jupiter", "en", 2, 200))
+            .unwrap();
+        cache.record_latest(latest("Mars", "en", 3, 300)).unwrap();
+
+        let recent = cache.recent(2);
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].title, "Mars");
+        assert_eq!(recent[1].title, "Jupiter");
+    }
+
+    #[test]
+    fn latest_dedupes_and_moves_to_front() {
+        let dir = TempDir::new().unwrap();
+        let cache = cache(&dir, "en");
+        cache.record_latest(latest("Earth", "en", 1, 100)).unwrap();
+        cache
+            .record_latest(latest("Jupiter", "en", 2, 200))
+            .unwrap();
+        cache.record_latest(latest("Earth", "en", 9, 300)).unwrap();
+
+        let entries = cache.load_latest().entries;
+        assert_eq!(entries.len(), 2, "same article must not duplicate");
+        assert_eq!(entries[0].title, "Earth");
+        assert_eq!(entries[0].revision_id, 9);
+        assert_eq!(entries[1].title, "Jupiter");
+    }
+
+    #[test]
+    fn latest_is_shared_across_languages() {
+        let dir = TempDir::new().unwrap();
+        cache(&dir, "en")
+            .record_latest(latest("Earth", "en", 1, 100))
+            .unwrap();
+        cache(&dir, "de")
+            .record_latest(latest("Erde", "de", 2, 200))
+            .unwrap();
+
+        let entries = cache(&dir, "en").recent(10);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].title, "Erde");
+        assert!(entries.iter().any(|e| e.language == "en"));
+    }
+
+    #[test]
+    fn latest_survives_a_wrong_schema() {
+        let dir = TempDir::new().unwrap();
+        let cache = cache(&dir, "en");
+        cache.record_latest(latest("Earth", "en", 1, 100)).unwrap();
+
+        let raw = fs::read_to_string(cache.latest_path()).unwrap();
+        fs::write(
+            cache.latest_path(),
+            raw.replace("\"schema\": 1", "\"schema\": 99"),
+        )
+        .unwrap();
+
+        assert!(cache.load_latest().entries.is_empty());
     }
 }

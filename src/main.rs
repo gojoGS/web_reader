@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use web_reader::cache::LatestEntry;
 use web_reader::service::{Article, WikiService};
 use web_reader::wiki::{self, SearchResult, WikiConfig};
 
@@ -45,6 +46,12 @@ enum Commands {
         #[arg(long)]
         print: bool,
     },
+    /// Show recently looked-up articles.
+    Latest {
+        /// Maximum number of entries to show.
+        #[arg(short, long, default_value_t = 10)]
+        limit: usize,
+    },
 }
 
 fn main() -> ExitCode {
@@ -77,6 +84,10 @@ fn run(cli: Cli) -> wiki::Result<()> {
         Commands::Article { title, save, print } => {
             let article = service.article(&title)?;
             emit_article(&article, save, print)
+        }
+        Commands::Latest { limit } => {
+            print_latest(&service.recent_lookups(limit));
+            Ok(())
         }
     }
 }
@@ -114,4 +125,24 @@ fn emit_article(article: &Article, save: Option<PathBuf>, print: bool) -> wiki::
         println!("{}", article.wikitext);
     }
     Ok(())
+}
+
+/// Print recently looked-up articles, newest first.
+fn print_latest(entries: &[LatestEntry]) {
+    if entries.is_empty() {
+        eprintln!("no lookups recorded yet");
+        return;
+    }
+    for entry in entries {
+        let source = if entry.from_cache { "cache" } else { "api" };
+        println!(
+            "{} [{}] rev {} ({}) — {} @ {}",
+            entry.title,
+            entry.language,
+            entry.revision_id,
+            entry.revision_timestamp,
+            source,
+            entry.looked_up_at
+        );
+    }
 }
