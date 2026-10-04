@@ -1,9 +1,10 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use web_reader::markdown::MarkdownRenderer;
 
 use web_reader::cache::LatestEntry;
-use web_reader::service::{Article, WikiService};
+use web_reader::service::WikiService;
 use web_reader::wiki::{self, SearchResult, WikiConfig};
 
 #[derive(Debug, Parser)]
@@ -39,23 +40,6 @@ enum Commands {
     Article {
         /// Page title, e.g. "Rust (programming language)".
         title: String,
-        /// Save the wikitext to this file.
-        #[arg(short, long)]
-        save: Option<PathBuf>,
-        /// Print the wikitext even when saving to a file.
-        #[arg(long)]
-        print: bool,
-    },
-    /// Fetch a page and render it as Markdown.
-    Markdown {
-        /// Page title, e.g. "Rust (programming language)".
-        title: String,
-        /// Save the Markdown to this file.
-        #[arg(short, long)]
-        save: Option<PathBuf>,
-        /// Print the Markdown even when saving to a file.
-        #[arg(long)]
-        print: bool,
     },
     /// Show recently looked-up articles.
     Latest {
@@ -92,13 +76,12 @@ fn run(cli: Cli) -> wiki::Result<()> {
             print_search(&query, &results);
             Ok(())
         }
-        Commands::Article { title, save, print } => {
+        Commands::Article { title } => {
             let article = service.article(&title)?;
-            emit_article(&article, save, print)
-        }
-        Commands::Markdown { title, save, print } => {
-            let markdown = service.markdown(&title)?;
-            emit_text(&markdown, save, print)
+            let renderer = MarkdownRenderer::new("https://en.wikipedia.org/wiki/");
+            let markdown = renderer.render(&article.wikitext);
+            print!("{}", markdown);
+            Ok(())
         }
         Commands::Latest { limit } => {
             print_latest(&service.recent_lookups(limit));
@@ -119,27 +102,6 @@ fn print_search(query: &str, results: &[SearchResult]) {
             println!("    {description}");
         }
     }
-}
-
-/// Print an article's revision info, optionally save and/or echo its wikitext.
-fn emit_article(article: &Article, save: Option<PathBuf>, print: bool) -> wiki::Result<()> {
-    eprintln!(
-        "{} — revision {} ({})",
-        article.title, article.revision_id, article.revision_timestamp
-    );
-    emit_text(&article.wikitext, save, print)
-}
-
-/// Optionally save and/or echo a block of text.
-fn emit_text(text: &str, save: Option<PathBuf>, print: bool) -> wiki::Result<()> {
-    if let Some(path) = &save {
-        std::fs::write(path, text)?;
-        eprintln!("saved {} bytes to {}", text.len(), path.display());
-    }
-    if print || save.is_none() {
-        print!("{text}");
-    }
-    Ok(())
 }
 
 /// Print recently looked-up articles, newest first.
