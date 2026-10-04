@@ -77,7 +77,7 @@ impl WikiService {
 
     /// Fetch a page's latest public revision as wikitext, using the on-disk
     /// cache when a fresh entry exists for this language.
-    pub fn article(&self, title: &str) -> wiki::Result<Article> {
+    pub fn article_from_title(&self, title: &str) -> wiki::Result<Article> {
         let cached = self.cache.load(title);
 
         if let Some(entry) = &cached {
@@ -149,13 +149,20 @@ impl WikiService {
         self.cache.recent(n)
     }
 
-    /// Fetch a page and render its wikitext as Markdown.
-    pub fn markdown(&self, title: &str) -> wiki::Result<String> {
-        let article = self.article(title)?;
-        Ok(crate::markdown::to_markdown(
-            &article.wikitext,
-            &self.site_base,
-        ))
+    /// Fetch an article from a URL produced by [`SearchResult::url`].
+    ///
+    /// Only URLs under this service's [`site_base`](Self::site_base) are
+    /// accepted; anything else is an error. The URL is reduced to a title and
+    /// then goes through the same pipeline as [`article_from_title`].
+    ///
+    /// [`SearchResult::url`]: wiki::SearchResult::url
+    pub fn article_from_url(&self, url: &str) -> wiki::Result<Article> {
+        let title = wiki::title_from_url(&self.site_base, url).ok_or_else(|| {
+            wiki::WikiError::InvalidArticleUrl {
+                url: url.to_string(),
+            }
+        })?;
+        self.article_from_title(&title)
     }
 
     fn record_lookup(&self, article: &Article, from_cache: bool) {

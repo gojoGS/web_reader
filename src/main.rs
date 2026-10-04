@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use std::process::ExitCode;
 
 use web_reader::cache::LatestEntry;
+use web_reader::markdown::MarkdownRenderer;
 use web_reader::service::WikiService;
 use web_reader::wiki::{self, SearchResult, WikiConfig};
 
@@ -37,10 +38,12 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Fetch a page's latest public revision as wikitext.
+    /// Fetch an article and print it as Markdown.
+    ///
+    /// Takes a page title, or an article URL as produced by `search`.
     Article {
-        /// Page title, e.g. "Rust (programming language)".
-        title: String,
+        /// Page title, or an article URL from `search`.
+        target: String,
     },
     /// Show recently looked-up articles.
     Latest {
@@ -74,16 +77,29 @@ fn run(cli: Cli) -> wiki::Result<()> {
     match cli.command {
         Commands::Search { query, limit, json } => {
             let results = service.search(&query, limit)?;
+            let site_base = service.site_base();
             if json {
-                println!("{}", serde_json::to_string_pretty(&results)?);
+                let items: Vec<SearchJson> = results
+                    .iter()
+                    .map(|result| SearchJson {
+                        result,
+                        url: result.url(site_base),
+                    })
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&items)?);
             } else {
-                print_search(&query, &results);
+                print_search(&query, &results, site_base);
             }
             Ok(())
         }
-        Commands::Article { title } => {
-            let markdown = service.markdown(&title)?;
-            print!("{markdown}");
+        Commands::Article { target } => {
+            let article = if target.starts_with("http://") || target.starts_with("https://") {
+                service.article_from_url(&target)?
+            } else {
+                service.article_from_title(&target)?
+            };
+            let renderer = MarkdownRenderer::new(service.site_base());
+            print!("{}", renderer.render(&article.wikitext));
             Ok(())
         }
         Commands::Latest { limit } => {
@@ -94,7 +110,7 @@ fn run(cli: Cli) -> wiki::Result<()> {
 }
 
 /// Print search results, or a short notice when there are none.
-fn print_search(query: &str, results: &[SearchResult]) {
+fn print_search(query: &str, results: &[SearchResult], site_base: &str) {
     if results.is_empty() {
         eprintln!("no results for {query:?}");
         return;
@@ -104,7 +120,16 @@ fn print_search(query: &str, results: &[SearchResult]) {
         if let Some(description) = result.description.as_deref().filter(|d| !d.is_empty()) {
             println!("    {description}");
         }
+        println!("    {}", result.url(site_base));
     }
+}
+
+/// A search result plus its article URL, for JSON output.
+#[derive(serde::Serialize)]
+struct SearchJson<'a> {
+    #[serde(flatten)]
+    result: &'a SearchResult,
+    url: String,
 }
 
 /// Print recently looked-up articles, newest first.

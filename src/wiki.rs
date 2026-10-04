@@ -7,10 +7,31 @@
 
 use std::time::Duration;
 
-use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+use percent_encoding::{
+    AsciiSet, CONTROLS, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode,
+};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+/// Characters percent-encoded when placing a page title in a URL. Space is
+/// handled separately (turned into `_`); `?` and `#` are encoded so a title can
+/// never be mistaken for a query string or fragment.
+const TITLE_ENCODE: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'<')
+    .add(b'>')
+    .add(b'?')
+    .add(b'[')
+    .add(b']')
+    .add(b'{')
+    .add(b'}')
+    .add(b'|')
+    .add(b'\\')
+    .add(b'^')
+    .add(b'`');
 
 /// Default `User-Agent`, including contact information as required by the
 /// [Wikimedia User-Agent policy](https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy).
@@ -50,6 +71,9 @@ pub enum WikiError {
         field: &'static str,
         context: String,
     },
+
+    #[error("not an article URL produced by this site: {url}")]
+    InvalidArticleUrl { url: String },
 }
 
 pub type Result<T> = std::result::Result<T, WikiError>;
@@ -193,6 +217,36 @@ pub struct SearchResult {
     pub thumbnail: Option<Thumbnail>,
 }
 
+impl SearchResult {
+    /// Browser-ready article URL, built from the result's URL-friendly `key`.
+    ///
+    /// This is exactly the form [`title_from_url`] accepts, so the output of
+    /// `search` can be fed straight back into `article`.
+    pub fn url(&self, site_base: &str) -> String {
+        format!("{site_base}{}", encode_title(&self.key))
+    }
+}
+
+/// Percent-encode a page title for use in a wiki URL (spaces become `_`).
+pub fn encode_title(title: &str) -> String {
+    utf8_percent_encode(&title.replace(' ', "_"), TITLE_ENCODE).to_string()
+}
+
+/// Recover a page title from a URL that [`encode_title`] / [`SearchResult::url`]
+/// produced. Returns `None` if `url` is not under `site_base`.
+///
+/// Assumes the URL came from this project, so no host validation beyond the
+/// `site_base` prefix is performed.
+pub fn title_from_url(site_base: &str, url: &str) -> Option<String> {
+    let rest = url.trim().strip_prefix(site_base)?;
+    let rest = rest.split(['?', '#']).next().unwrap_or(rest);
+    if rest.is_empty() {
+        return None;
+    }
+    let decoded = percent_decode_str(rest).decode_utf8_lossy();
+    Some(decoded.replace('_', " "))
+}
+
 /// Reduced-size lead image returned with a search result.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Thumbnail {
@@ -262,4 +316,75 @@ fn truncate(text: &str, max_chars: usize) -> String {
     let mut out: String = text.chars().take(max_chars).collect();
     out.push('…');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BASE: &str = "https://en.wikipedia.org/wiki/";
+
+    fn result(key: &str) -> SearchResult {
+        SearchResult {
+            id: 1,
+            key: key.to_string(),
+            title: key.replace('_', " "),
+            excerpt: String::new(),
+            description: None,
+            matched_title: None,
+            thumbnail: None,
+        }
+    }
+
+    #[test]
+    fn url_round_trips_through_title_from_url() {
+        for title in [
+            "Rust (programming language)",
+            "München",
+            "C++",
+            "Earth",
+            "A/B subpage",
+            "Who?",
+        ] {
+            let url = format!("{BASE}{}", encode_title(title));
+            assert_eq!(
+                title_from_url(BASE, &url).as_deref(),
+                Some(title),
+                "title={title:?} url={url}"
+            );
+        }
+    }
+
+    #[test]
+    fn search_result_url_is_browser_ready() {
+        let url = result("Rust_(programming_language)").url(BASE);
+        assert_eq!(
+            url,
+            "https://en.wikipedia.org/wiki/Rust_(programming_language)"
+        );
+    }
+
+    #[test]
+    fn non_ascii_and_punctuation_are_encoded() {
+        assert_eq!(encode_title("München"), "M%C3%BCnchen");
+        assert_eq!(encode_title("Who?"), "Who%3F");
+    }
+
+    #[test]
+    fn title_from_url_rejects_foreign_or_non_urls() {
+        assert_eq!(
+            title_from_url(BASE, "https://de.wikipedia.org/wiki/Erde"),
+            None
+        );
+        assert_eq!(title_from_url(BASE, "Rust"), None);
+        assert_eq!(title_from_url(BASE, "https://en.wikipedia.org/wiki/"), None);
+    }
+
+    #[test]
+    fn title_from_url_ignores_query_and_fragment() {
+        assert_eq!(
+            title_from_url(BASE, "https://en.wikipedia.org/wiki/Earth?oldid=1#History").as_deref(),
+            Some("Earth")
+        );
+    }
 }

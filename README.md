@@ -12,18 +12,23 @@ an on-disk article cache, and a wikitext → Markdown converter built on
 ## Usage
 
 ```sh
-# Full-text search (prints "<id>  <title>" plus a short description)
+# Full-text search: prints "<id>  <title>", a description, and a pasteable URL
 cargo run -- search "Rust programming language" --limit 5
 
-# ...as JSON, for scripts (array of result objects, each with an `id`)
+# ...as JSON, for scripts (array of result objects, each with `id` and `url`)
 cargo run -- search "Rust programming language" --json
 
-# Fetch an article by title and print it as Markdown
+# Fetch an article and print it as Markdown. Takes a title, or a URL from search.
 cargo run -- article "Rust (programming language)"
+cargo run -- article "https://en.wikipedia.org/wiki/Rust_(programming_language)"
 
 # Show recently looked-up articles
 cargo run -- latest --limit 5
 ```
+
+The `search` → `article` round-trip is the intended flow: copy a URL from `search`
+(or read `.url` from `--json`) and hand it to `article`. Result URLs are
+percent-encoded and browser-ready.
 
 ## Configuration
 

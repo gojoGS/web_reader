@@ -10,23 +10,8 @@ use parse_wiki_text::{
     Configuration, DefinitionListItem, DefinitionListItemType, ListItem, Node, TableCaption,
     TableRow,
 };
-use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 
-/// Characters percent-encoded when building wiki page URLs. Space is handled
-/// separately (turned into `_`), and `#`/`:`/`/` stay literal for fragments.
-const TITLE_ENCODE: &AsciiSet = &CONTROLS
-    .add(b' ')
-    .add(b'"')
-    .add(b'<')
-    .add(b'>')
-    .add(b'[')
-    .add(b']')
-    .add(b'{')
-    .add(b'}')
-    .add(b'|')
-    .add(b'\\')
-    .add(b'^')
-    .add(b'`');
+use crate::wiki::encode_title;
 
 /// Converts wikitext into Markdown, resolving wiki links against `wiki_base`
 /// (for example `https://en.wikipedia.org/wiki/`).
@@ -340,12 +325,10 @@ fn link_url(base: &str, target: &str) -> String {
         Some((page, fragment)) => (page, Some(fragment)),
         None => (target, None),
     };
-    let page = page.replace(' ', "_");
-    let page = utf8_percent_encode(&page, TITLE_ENCODE).to_string();
-    let mut url = format!("{base}{page}");
+    let mut url = format!("{base}{}", encode_title(page));
     if let Some(fragment) = fragment {
         url.push('#');
-        url.push_str(&utf8_percent_encode(&fragment.replace(' ', "_"), TITLE_ENCODE).to_string());
+        url.push_str(&encode_title(fragment));
     }
     url
 }
